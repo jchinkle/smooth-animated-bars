@@ -4,7 +4,7 @@ Player-facing notes for each release. Write for players: what they can now
 do or see, and what was broken and now works. Leave out internal changes.
 Sections are `### New` and `### Fixed`; skip one that would be empty.
 
-## 1.12.0
+## 1.13.0
 
 ### New
 - **Breath bar**: the bar the game shows while you hold your breath under
@@ -19,6 +19,45 @@ Sections are `### New` and `### Fixed`; skip one that would be empty.
   fills with the liquid too, in its own gold or any theme. As fatigue runs
   out, drops gather under its front and fall away. Turn it, or the drips,
   off under Breath and Fatigue in the editor.
+
+## 1.12.1
+
+### Fixed
+- An addon's debuff timer bars, drawn in the game's own aura buttons, no
+  longer give an error in chat. The game keeps those bars to itself, so they
+  stay as the game draws them.
+
+## 1.12.0
+
+### New
+- **Settings for each character**: give a character its own look by
+  unticking Use Account-Wide Settings on the editor's new Profiles tab.
+- **Copy settings** from another character, or from the account-wide ones,
+  on the Profiles tab.
+- **Shields on your health**: while a shield is on you, the end of your
+  health bar turns into a barrier of golden glass. It flares when it soaks a
+  hit and shatters when it ends. Turn it off under Shield in the editor's
+  Combat tab.
+- **Weakened Soul on your health**: after Power Word: Shield, your health's
+  edge turns to ash and slowly warms back to gold, then flashes when you can
+  be shielded again. Turn it off under Weakened Soul in the editor's Combat
+  tab.
+- **DoT marker learns your real damage**: after each fight it reads what your
+  DoTs actually did from the game's damage meter, so the marker and kill icon
+  keep up with your gear. Thanks to DoesItDie, whose tracking this follows.
+
+### Fixed
+- A DoT that is resisted and never ticks no longer stays on the marker for
+  its whole duration.
+- Rend and other bleeds no longer run out on the marker a tick early when
+  your swings land just before their ticks.
+- With action targeting, a DoT cast while the last kill is still your target
+  goes on the next mob, not the corpse.
+- DoTs cast with a `/cast [@mouseover]` macro, or with the game's own
+  Mouseover Cast option, go on the mob under your mouse.
+- Rip and Rupture no longer vanish from the marker when an auto-attack misses
+  at the same moment.
+- The editor's panels have borders in the game's own style.
 
 ## 1.11.0
 

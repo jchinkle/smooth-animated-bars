@@ -22,7 +22,7 @@ for players; `docs/DEVELOPMENT.md` covers the layout and tools; this file holds 
   (`Options.lua`); every setting is still registered with the game (`Settings.RegisterAddOnSetting`, no rows) and
   changed through it (`Core.SetSetting`). Never register initializers into the game's vertical layout lists: on
   Forever that taints the Social page. `tools/harness/editor_shot.py` draws the editor's layout. One exception to
-  registering: a bar's own effects (`SmoothAnimatedBarsDB.effects[barKey][effect]`, `Core.SetEffect`), a nested table
+  registering: a bar's own effects (the profile's `effects[barKey][effect]`, `Core.SetEffect`), a nested table
   the Settings API cannot hold, read by each bar's liquids and markers (`b.opts`, filled by `Bars.FillEffects` whenever an effect changes).
 - **Lua's 200 locals:** `Bars.lua`'s main chunk is at the limit; one more file-level `local` fails to load in game
   ("main function has more than 200 local variables", seen). Put new functions on a table (`Bars.X`) instead.
@@ -34,7 +34,11 @@ for players; `docs/DEVELOPMENT.md` covers the layout and tools; this file holds 
 - **Gallery:** `branding/gallery/` holds the README's images: animated WebP for each scenario (`hero`,
   `mage`, `rogue`, `warlock` and `rend` with the DoT marker, `priest` with the heal marker, `druid` with both, `eating`, a meal up to its buff, `mana`, the build-up to mana regenerating, `fury`, a warrior's rage building to full and spent back to 40%, `plates`, four Normal-style nameplates drawn from the captured plate art (`gallery.py`, `PLATES`), two with DoTs, and `prd`, a warrior's Personal Resource Display through a fight to furious rage and a bandage, on the same plate art, its bar sizes Edit Mode's defaults as guessed, and `party`, four party members stacked as in game, on the party art with the setup's example party and its class icons for portraits; the power mask and bar are shifted
   1.5 right and 1.9 down there (`gallery.py`, `PARTY_POWER_SHIFT`): at Forever's own offsets they sat over the gold divider in the captured art, though in
-  game the game's fill does not, so the gallery was tuned by eye to sit in the slot; the example party in the setup and the editor (`Preview.lua`, `PARTY_POWER_SHIFT`) showed the same in game and takes the same shift, the capture keeping the game's offsets), and `raid`, a ten-player raid through a pull in two groups of raid-style frames, on the raid frame art (`gallery.py`, `RAIDERS`), its tank targeted, and PNG stills (`frames.png`, `themes.png`), at full quality (`K = 3.0`, 20 fps). No GIFs.
+  game the game's fill does not, so the gallery was tuned by eye to sit in the slot; the example party in the setup and the editor (`Preview.lua`, `PARTY_POWER_SHIFT`) showed the same in game and takes the same shift, the capture keeping the game's offsets), and `raid`, a ten-player raid through a pull in two groups of raid-style frames, on the raid frame art (`gallery.py`, `RAIDERS`), its tank targeted, and `shield`, a priest's Power Word: Shield soaking five hits and shattering, no Weakened Soul (asked for; not made by
+  `gallery.py`: the mock cannot lay the shield out from the secret absorb, so it was composited from the gallery's own
+  player frame with the real `Shield.lua` and `Soul.lua` rendered where the client would place them, as the shield's
+  previews were; render it that way again if either changes), and PNG stills (`frames.png`, `themes.png`), at full
+  quality (`K = 3.0`, 20 fps). No GIFs.
   A full run takes about a quarter of an hour, so run it in the background.
 - **Frame art:** `branding/art/` is Forever's own unit frame art, captured in game with `/sab capture` and
   cut out by `tools/capture_art.py` (`/sab capture plates` and `--plates` for the nameplates' pieces, `/sab capture
@@ -106,8 +110,17 @@ Facts found while building this, which the code relies on and which are not obvi
   log is closed to addons (registering `COMBAT_LOG_EVENT_UNFILTERED` shows a "blocked" popup). `UNIT_COMBAT`
   still fires on the target, focus and nameplates with plain actions (WOUND, PARRY, DODGE...), but its damage
   amounts are secret: a whole session of a warrior's Rends in DoesItDie's saved log had not one readable hit.
-  So no tick is ever seen, DoTs run on their tooltip numbers, and a missing tick only counts on a mob whose
-  hits have shown readable amounts. The hit's flag is readable, though (seen in game: `BLOCK_REDUCED`, and a crit
+  The school stays readable, so (as DoesItDie 0.9.1 to 0.9.4 does; ported here) a hit is matched to a DoT's tick by
+  school and timing alone (`onHiddenAmountHit`), bleeds kept on their cast's schedule so white swings can't pull them
+  early; a DoT that never ticks is dropped, but only on a mob whose hits have shown their school (`schoolHitAt`;
+  DoesItDie drops on any mob in view). The tooltip's numbers leave out spell and attack power, so after combat the
+  damage meter's per-spell totals (`C_DamageMeter`, readable then; seen in game by DoesItDie on a warlock) teach each
+  DoT's real tick (`learnFromMeter`), blended by tick count. The meter counts every tick and the tally only those seen,
+  so a fight is not learned from where a DoT ticked out of sight (`Dots.LoseSight`: tabbed away, its plate gone while
+  the mob lived), a finisher's points were unknown, or the addon loaded mid-fight (a review found the first saved 1.7
+  times the real tick). Still inherited from DoesItDie: any hit of the school near a tick is taken for it, the
+  player's own Mind Flay or Drain Life too. Not yet seen here in game: any of the ported part. The
+  hit's flag is readable, though (seen in game: `BLOCK_REDUCED`, and a crit
   made a Rend gush), so a crit on the target makes a bleed gush; it does not say whose hit it was. `/sab dots` counts what the target's hits show (`Dots.lua`, `noteFlag`). The player's `UNIT_SPELLCAST_*` events and spell descriptions are readable. DoesItDie reports (not verified here) that
   creature GUIDs are secret in instances, so mobs there are keyed by their nameplate. The
   marker and kill icon (`Marker.lua`) leave every comparison with health to StatusBars, as the liquid does.
@@ -153,6 +166,81 @@ Facts found while building this, which the code relies on and which are not obvi
   and `OtherHealPredictionBar`, Mainline `PlayerFrame.xml`), a flat teal bar seen in game on a priest's Lesser
   Heal. At the bar's level it draws over the liquid, so `HealMarker.lua` keeps `MyHealPredictionBar.Fill`
   transparent while the heal marker shows; the other one (heals from others) is left alone.
+- **Shields** (`Shield.lua`, `shield`): Forever's player frame has the game's absorb display (`healthBar.TotalAbsorbBar`,
+  a segment with `Fill` and `TiledFillOverlay`, and `OverAbsorbGlow` at the bar's end; Camelot `PlayerFrame.lua` wires
+  them up). `UnitGetTotalAbsorbs` is `SecretReturns`, but the game's heal prediction calculator
+  (`CreateUnitHealPredictionCalculator`, filled by `UnitGetDetailedHealPrediction`) gives the absorb clamped as asked
+  (`SetDamageAbsorbClampMode`), secret. Seen in game (`/sab shield`, a level 6 priest): the calculator answers, and the
+  game's absorb bar and glow are readable (at full health the bar hidden, the glow shown), so they say when a shield goes
+  up and breaks. The shield is laid out as the DoT marker is, part of the health liquid: a hidden reverse bar from the
+  health's front, fed the absorb clamped to the whole bar, gives where it starts, and the health liquid's front moves
+  back there (`Bars.Front`); the shield (opaque dark-gold glass, a sheen brightening to a crescent rim on the front,
+  `Strands.tga` drifting, rays, crackle, motes) fills the rest, in the marker's frames (a clip with SPILL, a pool in it).
+  Four looks came before, each judged in game: a wall of light past the health's front where the game draws absorbs
+  (read as an incoming heal); see-through glass over the health's end (the green showed through); added light at the
+  harness's strength (washed to white in game, which draws added light several times stronger); and a golden liquid of
+  its own on the marker's way, with the health liquid lifted a level over it (`Bars.SetOver`), which hid the player
+  bar's text in game (the text copies the target frame gets did not show), so the shield never raises it. Judge the
+  shield at the game's size (about 1.3 px a unit here), not the gallery's 3. A clip frame inside a bar-sized clipping
+  frame once hid every texture the bar's mask cut (`/sab shield test` showed it); the marker's layout works. A texture has
+  one alpha: `SetVertexColor`'s fourth value and `SetAlpha` set the same thing. The shield gave its layers their strength
+  as a vertex alpha, then faded them in with `SetAlpha(1)`, so in game the faint sheen (0.16) drew opaque, a flat cream
+  block over the glass (seen in game, both with added and with blended light; the harness had multiplied the two, so its
+  renders looked right). The washed-out added light above was likely this too. Strengths now go through `SetAlpha` alone
+  and the shield fades by its frame's alpha; the mock keeps one alpha per texture. Seen in game after that: the look
+  right, but the body ran a few pixels past the rim's crescent in a straight cut, and nothing tied the shield to the
+  health liquid. So the body is cut on the crescent by a mask of its own (`ShieldEdge.tga`, `EDGE_SPAN` rims wide,
+  `CLAMPTOBLACKADDITIVE`), and where the two meet the shield's light spills back over the health (`contact`), lit a
+  moment after a soaked hit. Nothing left the shield either (asked
+  for: light sparking out, god rays), so it sheds god rays from the rim's middle past the bar (`Beam.tga`, square so
+  `SetRotation` can aim it, `shed`) and embers drift off the rim while it holds. The rays' frame is on the bar, not in
+  the clip: cut to SPILL around the bar they ended in a hard box. In game the health then ended stick straight and still
+  at the shield: its front's waves lay under the opaque glass. A band of glass clouding over before the body came
+  next, in colours of its own (the glass's, then the body's average with its strands, measured on a render): in game
+  each showed as a strip with a step where the body began, the body's colour there never quite the band's. So the
+  whole body, every layer, fades in from `LEAD` back over the health's end over `FADE_W` by a mask of its own
+  (`fadeIn`, `ShieldFade.tga`, `FADE_SPAN` fades wide, a third mask on each body texture after the bar's and the
+  edge's), with nothing of its own colour to match, the spill swelling to it and fading out across it
+  (`spillOut`), in a frame of its own (`glow`) that breathes. The health liquid's front
+  is on the shield's start itself: set `LEAD` past it, it ran past the real health as a shield drained, and at full
+  health the whole liquid slid right, a gap at the bar's left end (seen in game). The shield laps at it now and then
+  (`Bars.Lap`, `Liquid:Nudge`: a ripple with no splash), a soaked hit harder; at 45 every 0.8 s the health kept
+  sloshing when idle (seen in game), now 10 every 1.8 s, felt better in game. A mirrored crescent once stood where the
+  glass turns opaque, the barrier's back face: in game a stray C beside the health, so it is gone. How a shield ends (asked for: something really cool): however it goes, broken, run out or taken off, it
+  shatters (`SHATTER`: the glass strains with glowing cracks, whitening and a tremble, then flashes white in its
+  own shape and bursts into shards, `Shard.tga`, and streaks, with a shockwave off the rim, `blast`, and a splash
+  in the health). A shield that ran out or was taken off once dissolved instead (the glass brightening, then
+  fading out among rising lights; a slow fade before that was a muddy smear): not liked, so every ending
+  shatters. Either way the glass holds its last place: a
+  second hidden bar (`ghost`, `hold`) is fed as the run is and stops being fed when it ends, while the run drains
+  and the health flows up beneath (faded while the health was still flowing up, the empty bar showed between them
+  in game), the run measured from the rim while the glass shows (`RunInset`, `m.inset`): let through to the health's
+  front, the last `RIM_INSET` units of green showed past the rim the moment the shield broke. Render the endings
+  as the game runs them (the run easing to nothing, the glass its last size back from the health's front, which the
+  breaking hit moves) and look at them frame by frame: a render that dropped the shield in one frame hid all this. What bursts or rises is spawned along a whole bar back from the rim and cut to the shield by a mask of
+  the fade-in's shape SPILL taller (`burstFade`), so a bigger shield throws more; cut by the pool instead, the shards
+  ended in a hard line. `Crystal.tga` (an ice shard clear in its middle) drew as faint outlines, hence `Shard.tga`; a
+  flash of its own over the shield was a hard-edged box, hence the glass whitening itself. A heal cast on yourself with a shield up painted green over the
+  shield: the heal marker's seam (`HealMarker.lua`) lays the health's colour on the health's edge, where the health
+  liquid's front no longer is. While the front is moved (`Bars.Moved`) the heal marker lies side by side from the
+  health's edge, past the shield, with no seam. Not yet seen in game: the endings, and
+  `ABSORB` on the player (the rim's flare on a soaked hit).
+- **Weakened Soul** (`Soul.lua`, `weakenedSoul`; Forever's tooltip: 15 s, Power Word: Shield 30 s): auras are secret in
+  combat, so the wait is timed from a shield going up (`Shield.Exists`, the game's absorb display), unless the player's
+  own cast of another spell whose description says "absorb" went off within `ATTRIBUTE` (English only); out of combat
+  the debuff itself is read, which starts, corrects or ends the wait. Where the absorb display is secret, the player's
+  own shield sent at themselves (`UNIT_SPELLCAST_SENT`'s target) starts it. Drawn on the health liquid's own front
+  (`Bars.Mover`) and the health's edge (`Bars.Edge`), so it follows the client's layout; while a shield holds, in its
+  glass (`Shield.State().mover`). Chosen from four mockups (ash, a healing crack, a ghost of the glass, a sigil) and
+  refined in mockups: ash over the breaking glass was a grey block, so it waits for the burst; a ring at the release
+  read as generic, hence the crescent. Its textures are all below OVERLAY sublevel 0, as the shield's: the bar's texts are
+  OVERLAY 1 at the same level. In combat any absorb going up that is not the player's own cast (a Voidwalker's
+  Sacrifice, an item) is taken for Power Word: Shield until the debuff can be read; a shield landing on one already up
+  is missed. Out of combat a debuff read as gone ends only a wait it was once read in (as `Heals.lua`). Where the absorb
+  display is secret, both files take the player's own shield on themselves from `UNIT_SPELLCAST_SENT`'s target against
+  `UnitName("player")`; what Forever sends there for a character with a surname is not yet seen. Neither the shield nor
+  Weakened Soul is drawn on other addons' player bars (Frames Forever and ClassicUI Forever fade the game's frame out,
+  so both stay hidden there): not built yet. `/sab soul test` plays it with no shield. Seen in game and liked: the look.
 - **Auras in combat:** `C_UnitAuras.GetPlayerAuraBySpellID` is `RequiresNonSecretAura`, and in game it answered
   "none" in combat for a Rejuvenation that was on the player. So a missing aura only ends a heal that was seen
   before, out of combat (`Heals.lua`, `checkAuras`). Sitting to eat or drink has no API; `PLAYER_STARTED_MOVING`
@@ -444,6 +532,13 @@ Facts found while building this, which the code relies on and which are not obvi
   rather than hides: hidden, it forgot what it had shown, so each fade-in replayed a meal's release and grew the DoTs
   in from nothing (a review caught it). While faded it drops landings and ticks (`calm`), and a buff reached meanwhile
   sates the bar quietly (`Bars.Sate`). Not yet seen in game.
+  Aura timers (issue #13, found in game by a DoT timer addon's author): addons show a target's debuffs only through
+  the game's `CustomAuraContainerTemplate`, whose buttons drive the bar handed to `SetDurationBar`, and once an aura is
+  assigned the button and everything in it are forbidden (our liquid's frames too: "calling 'SetVertexColor' on bad
+  self"), its bar's getters included, and `C_UnitAuras` throws in combat. So `AddBar` declines a bar under a frame
+  with `SetDurationBar` or a forbidden one (`Bars.AuraBound`), and `RunBar` drops one that turns forbidden without a
+  word in chat. The mock's `__forbid` makes a region and its children reject every method but `IsForbidden`. Not yet
+  seen in game: whether the button's `SetDurationBar` and `IsForbidden` answer as expected.
 - **The editor** (`Editor.lua`): the game's `ButtonFrameTemplate` window (as the setup's), tabs on the character
   sheet's title plaque (`UI-Character-Info-Title`, as Road to Sixty's mode switch: the picked one in colour, the others
   desaturated at 70%; the scene buttons under the screen too), `UICheckButtonTemplate` boxes, `UIPanelButtonTemplate` buttons, and chips of our own. Its colour tiles are stills of each theme's liquid (`PaintTile`):
@@ -464,7 +559,10 @@ Facts found while building this, which the code relies on and which are not obvi
   instead of playing the scene (`Preview.Resting`, in `SetFraction` and `SetPlate`), asked for once raid frames, off by
   default, kept animating their plain fill. The heal scene feeds a heal marker on the example's health
   (`HealMarker.Preview`, named "preview" so real heals and meals never reach it): a Renew, then a bandage; in game the
-  first build's Healing only moved the bar (seen). A colour tile under the mouse is tried on every bar its setting
+  first build's Healing only moved the bar (seen). Its panels (the screen, the inspector, the cards and rows) are Road to
+  Sixty's panes (its `Screens.Pane`, `Editor.lua` `Pane`): `BackdropTemplate` with the tooltip border and ground by
+  file ID (137057, 137056, as AceGUI uses them on Forever; the backdrop hands them to `SetTexture`), grey 0.6, gold on
+  the open card; the screen's is an edge-only frame over its examples. Not yet seen in game. A colour tile under the mouse is tried on every bar its setting
   reaches, real and example, without being saved (`Core.Try`, read by `Core.ColorChoice`), until the mouse leaves or
   the window closes. In game the first drawers were empty: a pane anchored TOPLEFT and RIGHT has its vertical middle
   pinned to its parent's too, which gave it a negative height (the mock does not model that); panes take both top
@@ -493,5 +591,15 @@ Facts found while building this, which the code relies on and which are not obvi
 ## Dev setup
 
 `_forever_\Interface\AddOns\SmoothAnimatedBars` is a junction to this repo's `SmoothAnimatedBars/`, so
-`/reload` loads the working copy. Settings are account-wide in `SmoothAnimatedBarsDB`; `setupDone` marks
+`/reload` loads the working copy. Settings are account-wide in `SmoothAnimatedBarsDB.global` by default (as the user
+asked), or a character's own in `.profiles["Name - Realm"]` ("First Last - Ruleset" on Forever) for a character in
+`.ownSettings`; `Core.db` is the profile in use, and the game's registered settings reach it through a proxy table
+(`settingsView`), so a switch needs no re-registering. Everything else at the root (`Core.account`) is the account's:
+the setup (shown once per account), the changelog, the DoT data, `/sab` logs, the plate art. Earlier versions' flat
+settings become `.global` on load. A character's own settings start as a copy of `.global` and are kept if it goes back
+to sharing. Editor's Profiles tab: Use Account-Wide Settings, a picker with arrows and Copy (`Core.SetUseGlobal`,
+`Core.CopySources`, `Core.CopyProfile`); clicking the picker opens the game's menu (`MenuUtil.CreateContextMenu`), but
+not under the controller interface, for the reason the unit menus are left alone there (`Options.GamepadUI`). A profile change while the setup is open: its Skip puts back every profile it saw in use, as first seen (a
+character's own made then from the shared ones as the shared ones were), but leaves a copy over one as copied
+(`Wizard.ProfileChanged`; a review found switching away and back had lost the Skip). `setupDone` marks
 that the setup wizard has run. The tools need `tools/venv` (`pip install lupa numpy pillow`).

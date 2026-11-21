@@ -12,7 +12,32 @@ local function anchorPos(name, w, h)
 end
 
 local Region = {}
-Region.__index = Region
+
+-- Forbidden objects: the client makes an aura button (CustomAuraContainer's) and everything in it forbidden once an
+-- aura is assigned, frames an addon made inside it too, and then every method but IsForbidden fails for an addon
+-- (issue #13, seen in game by its reporter). __forbid(region) does that here; until it is used nothing is looked up.
+local forbids = 0
+local function Forbidden(r)
+    while r do
+        if rawget(r, "__forbidden") then return true end
+        r = rawget(r, "parent")
+    end
+    return false
+end
+Region.__index = function(self, k)
+    local m = Region[k]
+    if forbids > 0 and type(m) == "function" and k ~= "IsForbidden" and Forbidden(self) then
+        return function()
+            error("calling '" .. k .. "' on bad self (Attempt to access forbidden object from code tainted by an AddOn)", 2)
+        end
+    end
+    return m
+end
+function Region:IsForbidden() return Forbidden(self) end
+function __forbid(r)
+    r.__forbidden = true
+    forbids = forbids + 1
+end
 
 local function NewRegion(kind, parent, layer, sub)
     local r = setmetatable({
@@ -171,7 +196,12 @@ function Region:UnregisterAllEvents() self.events = {} end
 function Region:IsEventRegistered(e) return self.events[e] end
 function Region:SetTexture(file, wh, wv) self.file, self.wrap, self.wrapV, self.color = file, wh, wv or wh, nil end
 function Region:SetColorTexture(r, g, b, a) self.file, self.color = "SOLID", { r, g, b, a or 1 } end
-function Region:SetVertexColor(r, g, b, a) self.vc, self.grad = { r, g, b, a or 1 }, nil end
+-- The client keeps one alpha for a texture: SetVertexColor's fourth value is the same alpha SetAlpha sets (seen in game:
+-- the shield's sheen, given 0.16 here and then faded in with SetAlpha(1), drew opaque). So the mock keeps it in alpha.
+function Region:SetVertexColor(r, g, b, a)
+    self.vc, self.grad = { r, g, b, 1 }, nil
+    if a ~= nil then self.alpha = a end
+end
 function Region:SetGradient(_, c1, c2)
     self.grad = { { c1:GetRGBA() }, { c2:GetRGBA() } }
 end
@@ -311,7 +341,7 @@ local ROW_TEMPLATES = {
 }
 local TEMPLATES = { MinimalScrollBar = true, UIPanelButtonTemplate = true, UIRadioButtonTemplate = true,
                     UICheckButtonTemplate = true,
-                    ButtonFrameTemplate = true }
+                    ButtonFrameTemplate = true, BackdropTemplate = true }
 local RowTemplate = {}
 function RowTemplate.Init(self, initializer)
     assert(self.GetElementData and self:GetElementData() == initializer, "row Init without its GetElementData")
@@ -326,6 +356,54 @@ local function insideOpenSettings(f)
     while f do
         if f == __settingsPanel then return __settingsPanel.shown end
         f = f.parent
+    end
+end
+
+-- The game's BackdropTemplate (Blizzard_SharedXML/Backdrop.lua): SetBackdrop lays its pieces out as textures of the
+-- frame in its BACKGROUND layer and hands each its file with SetTexture (so a file ID or a path), SetBackdropColor tints
+-- the centre and SetBackdropBorderColor the edges, with SetVertexColor. The corners are left out here; each edge is
+-- drawn a fifth of edgeSize thick, about the visible line of a tooltip border, so editor_shot.py can show it.
+local function makeBackdrop(f)
+    function f:SetBackdrop(info)
+        assert(type(info) == "table", "SetBackdrop(backdropInfo)")
+        assert(info.edgeFile or info.bgFile, "a backdrop with neither edgeFile nor bgFile")
+        for _, file in ipairs({ info.edgeFile or false, info.bgFile or false }) do
+            assert(file == false or type(file) == "number" or type(file) == "string", "backdrop file: a file ID or path")
+        end
+        self.backdropInfo = info
+        local size = info.edgeSize or 39
+        if info.bgFile then
+            local i = info.insets or {}
+            self.Center = self.Center or NewRegion("Texture", self, "BACKGROUND", -8)
+            self.Center:SetPoint("TOPLEFT", i.left or 0, -(i.top or 0))
+            self.Center:SetPoint("BOTTOMRIGHT", -(i.right or 0), i.bottom or 0)
+            self.Center:SetTexture(info.bgFile)
+        end
+        if info.edgeFile then
+            local thick = math.max(1, size / 5)
+            local edges = {
+                TopEdge = { "TOPLEFT", "TOPRIGHT", "h" }, BottomEdge = { "BOTTOMLEFT", "BOTTOMRIGHT", "h" },
+                LeftEdge = { "TOPLEFT", "BOTTOMLEFT", "w" }, RightEdge = { "TOPRIGHT", "BOTTOMRIGHT", "w" },
+            }
+            for name, e in pairs(edges) do
+                local t = self[name] or NewRegion("Texture", self, "BACKGROUND", -7)
+                t:SetPoint(e[1])
+                t:SetPoint(e[2])
+                if e[3] == "h" then t:SetHeight(thick) else t:SetWidth(thick) end
+                t:SetTexture(info.edgeFile)
+                self[name] = t
+            end
+        end
+    end
+    function f:SetBackdropColor(r, g, b, a)
+        assert(self.Center, "SetBackdropColor without a bgFile")
+        self.Center:SetVertexColor(r, g, b, a)
+        self.backdropColor = { r, g, b, a or 1 }
+    end
+    function f:SetBackdropBorderColor(r, g, b, a)
+        assert(self.TopEdge, "SetBackdropBorderColor without an edgeFile")
+        for _, name in ipairs({ "TopEdge", "BottomEdge", "LeftEdge", "RightEdge" }) do self[name]:SetVertexColor(r, g, b, a) end
+        self.backdropBorderColor = { r, g, b, a or 1 }
     end
 end
 
@@ -352,6 +430,7 @@ function CreateFrame(frameType, name, parent, template)
     if name then _G[name], f.name = f, name end
     if frameType == "StatusBar" then __makeStatusBar(f) end
     if frameType == "PlayerModel" then __makeModel(f) end
+    if template == "BackdropTemplate" then makeBackdrop(f) end
     if ROW_TEMPLATES[template] then
         f.rowTemplate, f.Init, f.Release = template, RowTemplate.Init, RowTemplate.Release
     end
@@ -385,6 +464,9 @@ function UnitName(unit)
     if unit == "player" then return __player.name, __player.surname end
     if __identitySecret[unit] then return __secret() end
     if unit == "target" and __target then return __target.name end
+    local u = (unit == "mouseover" or unit == "softenemy" or (type(unit) == "string" and unit:match("^nameplate%d+$")))
+        and __units[unit]
+    if u then return u.name end
 end
 -- Units whose identity is secret (in an instance or battleground): __identitySecret[unit] = true. Their names are
 -- secret, and so is the width of a menu title showing one (see __openUnitMenu).
@@ -636,6 +718,17 @@ do
         segment.Fill = segment:CreateTexture(nil, "BORDER")
         PlayerFrame.healthbar[key] = segment
     end
+    -- Its absorb segments (a Fill, and a tiled overlay on the shield's) and the glow at the bar's end when the shield
+    -- is more than the missing health (PlayerFrame.xml). The game hides the shield's segment when it has no width.
+    for _, key in ipairs({ "HealAbsorbBar", "TotalAbsorbBar" }) do
+        local segment = CreateFrame("Frame", nil, PlayerFrame.healthbar)
+        segment.Fill = segment:CreateTexture(nil, "BORDER")
+        PlayerFrame.healthbar[key] = segment
+        segment:Hide()
+    end
+    PlayerFrame.healthbar.TotalAbsorbBar.TiledFillOverlay = PlayerFrame.healthbar.TotalAbsorbBar:CreateTexture(nil, "BORDER")
+    PlayerFrame.healthbar.OverAbsorbGlow = PlayerFrame.healthbar:CreateTexture(nil, "ARTWORK")
+    PlayerFrame.healthbar.OverAbsorbGlow:Hide()
 end
 TargetFrame = UnitFrame("TargetFrame", "TargetFrameContent", "TargetFrameContentMain")
 FocusFrame = UnitFrame("FocusFrame", "TargetFrameContent", "TargetFrameContentMain")
@@ -766,8 +859,10 @@ TargetFrame.TargetFrameContainer.Portrait = TargetFrame.TargetFrameContainer:Cre
 
 -- The target: nil for none, else { guid, name, dead }. Its health is secret like the player's.
 __target = nil
--- A nameplate's unit (__units.nameplateN, set by __showPlate) exists, has its guid and can be dead like the target.
+-- A nameplate's unit (__units.nameplateN, set by __showPlate) exists, has its guid and can be dead like the target. So
+-- do the mob under the mouse and the soft enemy (__units.mouseover, __units.softenemy: { guid, name, dead, friendly }).
 local function plateUnit(unit)
+    if unit == "mouseover" or unit == "softenemy" then return __units[unit] end
     return type(unit) == "string" and unit:match("^nameplate%d+$") and __units[unit] or nil
 end
 function UnitExists(unit)
@@ -802,13 +897,15 @@ function UnitCanAssist(_, unit)
     return unit == "target" and __target ~= nil and (__target.friendly or __target.isPlayer) or false
 end
 function UnitCanAttack(_, unit)
-    if type(unit) == "string" and unit:match("^nameplate%d+$") then
+    if type(unit) == "string" and (unit:match("^nameplate%d+$") or unit == "mouseover" or unit == "softenemy") then
         local u = __units[unit]
         return u ~= nil and not u.friendly and not u.isPlayer
     end
     return unit == "target" and __target ~= nil and not __target.friendly and not __target.isPlayer
 end
-function GetComboPoints() return 0 end
+-- The player's combo points on the target, readable here (__comboPoints); the tests set them for finishers.
+__comboPoints = 0
+function GetComboPoints() return __comboPoints end
 -- Wall-clock seconds, as the client's time(): moves with the mock's clock.
 __epoch = 1800000000
 function time() return __epoch + math.floor(__now) end
@@ -896,11 +993,37 @@ function UnitPowerType(unit)
 end
 function UnitHealth() return __secret() end
 function UnitHealthMax() return __secret() end
+-- The heal prediction calculator (UnitHealPredictionCalculatorAPIDocumentation): the client fills it for a unit, and
+-- its damage absorbs come back secret, with whether they were cut to the clamp mode's bound (a secret boolean).
+-- __absorb holds the player's: toMissing (cut to the missing health), whole (cut to the whole bar), clamped.
+__absorb = { toMissing = 0, whole = 0, clamped = false }
+local Calculator = {}
+Calculator.__index = Calculator
+function Calculator:SetDamageAbsorbClampMode(mode)
+    assert(type(mode) == "number" and not issecretvalue(mode), "SetDamageAbsorbClampMode: an enum value")
+    self.mode = mode
+end
+function Calculator:GetDamageAbsorbs()
+    assert(self.filled, "GetDamageAbsorbs before UnitGetDetailedHealPrediction")
+    if self.mode == Enum.UnitDamageAbsorbClampMode.MaximumHealth then
+        return __secret(__absorb.whole), __secret(false)
+    end
+    return __secret(__absorb.toMissing), __secret(__absorb.clamped)
+end
+function CreateUnitHealPredictionCalculator()
+    return setmetatable({ mode = Enum.UnitDamageAbsorbClampMode.MissingHealth }, Calculator)
+end
+function UnitGetDetailedHealPrediction(unit, healer, calc)
+    assert(type(unit) == "string" and getmetatable(calc) == Calculator,
+        "Usage: UnitGetDetailedHealPrediction(unit, healerUnit, calculator)")
+    calc.filled = true
+end
 function UnitPower() return __secret() end
 function UnitPowerMax() return __secret() end
 -- The client's own StatusBar smoothing (Forever).
 Enum = { StatusBarInterpolation = { Immediate = 0, ExponentialEaseOut = 1 }, LuaCurveType = { Linear = 0, Step = 1 },
-         InputDeviceInterfaceType = { Mkb = 0, Gamepad = 1 } }
+         InputDeviceInterfaceType = { Mkb = 0, Gamepad = 1 },
+         UnitDamageAbsorbClampMode = { MissingHealth = 0, MissingHealthWithoutIncomingHeals = 1, MaximumHealth = 2 } }
 
 -- Curves (C_CurveUtil): plain points, evaluated on a value the client keeps secret into another secret, which widgets
 -- take (Region:SetAlpha). UnitPowerPercent evaluates one on the unit's share of its power, __powerPercent[unit]
@@ -956,6 +1079,21 @@ NamePlateSetupOptions = { healthBarFontHeight = 11, unitNameAnchorStyle = 2 }
 
 __combat = false
 function InCombatLockdown() return __combat end
+-- The damage meter (C_DamageMeter): the player's per-spell damage for the current combat session, __meter.spells =
+-- { { spellID = ..., totalAmount = ... } }, or nil while it has nothing. __meter.secret makes the totals secret.
+__meter = {}
+C_DamageMeter = {
+    GetCombatSessionSourceFromType = function(sessionType, damageType, guid)
+        assert(type(sessionType) == "number" and type(damageType) == "number" and type(guid) == "string",
+            "Usage: GetCombatSessionSourceFromType(sessionType, damageMeterType, sourceGUID)")
+        if not __meter.spells then return nil end
+        local rows = {}
+        for i, sp in ipairs(__meter.spells) do
+            rows[i] = { spellID = sp.spellID, totalAmount = __meter.secret and __secret(sp.totalAmount) or sp.totalAmount }
+        end
+        return { combatSpells = rows }
+    end,
+}
 function UnitAffectingCombat(unit) return unit == "player" and __combat or false end
 
 GameTooltip = NewRegion("Frame", UIParent)
@@ -1092,6 +1230,32 @@ function __openUnitMenu(which, contextData)
               .. "while execution tainted by 'SmoothAnimatedBars')")
     end
     return root.elements
+end
+-- MenuUtil.CreateContextMenu (Blizzard_Menu/MenuUtil.lua): runs the generator on a new root and shows the menu at the
+-- owner. __contextMenu keeps its elements; a radio's onClick sets it as the client's does on a click.
+__contextMenu = nil
+MenuUtil = {}
+function MenuUtil.CreateContextMenu(owner, generator, ...)
+    assert(type(owner) == "table" and type(generator) == "function", "MenuUtil.CreateContextMenu(ownerRegion, generator)")
+    -- The menu takes the gamepad's focus and pushes its bindings; opened from addon code that runs tainted, and the
+    -- gamepad action bar's protected call is blocked (seen in game with the unit menus; Options.lua, GamepadUI).
+    assert(not __gamepadUI, "ADDON_ACTION_FORBIDDEN: SetPreferredGamepadInteractTarget() (a menu opened by an addon "
+        .. "under the controller interface)")
+    local root = { elements = {} }
+    local function add(e)
+        table.insert(root.elements, e)
+        return e
+    end
+    function root:CreateRadio(text, isSelected, setSelected, data)
+        assert(type(text) == "string" and type(isSelected) == "function" and type(setSelected) == "function",
+            "CreateRadio(text, isSelected, setSelected, data)")
+        return add({ kind = "radio", text = text, selected = function() return isSelected(data) end,
+                     onClick = function() return setSelected(data) end })
+    end
+    function root:CreateButton(text, fn) return add({ kind = "button", text = text, onClick = fn }) end
+    generator(owner, root, ...)
+    __contextMenu = { owner = owner, elements = root.elements }
+    return __contextMenu
 end
 function Settings.RegisterAddOnCategory(cat) __settingsCategory = cat end
 -- Opening a canvas category puts its page in the panel and shows it (SettingsPanelMixin:DisplayLayout).

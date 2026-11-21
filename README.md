@@ -27,9 +27,13 @@ skip it.
 - **Your DoTs on the target (optional):** your damage over time eats into your target's health as liquid, and a skull
   shows when it will kill the target.
 - **Your heals, food and drink:** what is still to come shows ahead of your health and mana.
+- **Shields and Weakened Soul:** a shield on you turns the end of your health into golden glass, and Weakened Soul
+  shows as ash on your health's edge until you can be shielded again.
 - **Mana regen build-up:** your mana bar shows the five-second wait after a spell.
 - **Rage Fury:** your rage bar heats up as it fills, and bursts when you spend it.
 - **An editor** with every setting beside live examples of your frames: type `/sab`, or right-click your frame.
+- **Settings per character** if you want them: shared by every character to begin with, or a character's own once
+  you untick Use Account-Wide Settings on the editor's Profiles tab, where you can copy another character's too.
 
 <p align="center"><img src="https://raw.githubusercontent.com/Jordanburch101/smooth-animated-bars/refs/heads/main/branding/gallery/mage.webp" alt="A mage's mana dropping in big bites with each Fireball, and the kobold's health with it"></p>
 <p align="center"><em>Mage: each Fireball takes a chunk of your mana, and of the kobold's health.</em></p>
@@ -94,7 +98,7 @@ On by default, under Party in the editor, or right-click a party member's frame 
 <p align="center"><img src="https://raw.githubusercontent.com/Jordanburch101/smooth-animated-bars/refs/heads/main/branding/gallery/raid.webp" alt="Ten raid members in two groups of the game's raid frames through a pull: each health liquid in its class colour, the two warriors' red rage climbing as they tank, a burst of raid damage dropping everyone's health and the healers bringing it back, the casters' blue mana draining, and the main tank outlined as the target"></p>
 <p align="center"><em>Raid: the tanks build rage, the whole raid takes a hit and is healed back, and the casters' mana drains.</em></p>
 
-Turn on Health and Power under Raid in the editor.
+Turn them on in the setup, or Health and Power under Raid in the editor.
 
 - **The game's raid frames,** and your party's in raid-style frames.
 - **The game's names, icons, health text, heals, shields and target highlight** stay on top of the liquid.
@@ -169,6 +173,22 @@ It reads English spell text, so on other client languages it may miss your heals
   Slow stars keep rising after that, so you know you can get up.
 - **Moving or casting** stands you up and ends it.
 
+## Shields and Weakened Soul
+
+<p align="center"><img src="https://raw.githubusercontent.com/Jordanburch101/smooth-animated-bars/refs/heads/main/branding/gallery/shield.webp" alt="A priest's Power Word: Shield as golden glass over the end of the green health, shedding rays of light, flaring with each of five hits it soaks and wearing down, then straining with glowing cracks and bursting into shards of golden glass as the health flows back up"></p>
+<p align="center"><em>Priest: Power Word: Shield soaks five hits, wearing down, and shatters.</em></p>
+
+On by default, under Shield and Weakened Soul in the editor.
+
+- **Shields:** while Power Word: Shield or any other shield is on you, the end of your health turns into golden glass,
+  as much as the shield will soak. It flares when it soaks a hit and shatters when it ends.
+- **Weakened Soul:** after a Power Word: Shield lands on you, your health's edge turns to ash and warms back to gold
+  over its 15 seconds, then flashes when you can be shielded again. While the shield still holds, its rim shows the
+  same.
+- **It's timed from the shield going up,** as WoW Forever hides your debuffs from addons in combat. Out of combat it
+  reads Weakened Soul itself. In combat a shield you didn't cast yourself, such as a Voidwalker's Sacrifice, can start
+  it too.
+
 ## Mana regen build-up
 
 <p align="center"><img src="https://raw.githubusercontent.com/Jordanburch101/smooth-animated-bars/refs/heads/main/branding/gallery/mana.webp" alt="A mage's mana bar after a Fireball: motes gather into the front of the blue liquid, which turns pale while lightning starts up, then a burst of stars as the mana starts to flow back"></p>
@@ -230,8 +250,8 @@ bar's.
   which puts your colours on their bars instead of theirs, Game Colour meaning the game's own.
 - **Defaults** resets what's shown. **Run Setup** runs the setup again, and **What's New** shows recent changes.
 
-The setup has seven quick steps: which bars you want, your colours, your target's, your party's, how lively the
-liquid is, your DoTs, and nameplates, each shown on example frames. Skip leaves everything as it was.
+The setup has eight quick steps: which bars you want, your colours, your target's, your party's, raid frames, how
+lively the liquid is, your DoTs, and nameplates, each shown on example frames. Skip leaves everything as it was.
 
 ## Commands
 
@@ -245,6 +265,8 @@ liquid is, your DoTs, and nameplates, each shown on example frames. Skip leaves 
 | `/sab dots` | Your DoTs on the target, and what the DoT tracking saw lately |
 | `/sab heals` | Your heals, food and drink on the way, and what the tracking saw lately |
 | `/sab mana` | The wait before your mana regenerates, and what it saw lately |
+| `/sab shield` | What the game says about shields on you, and what the shield is doing |
+| `/sab soul` / `/sab soul test` | What Weakened Soul saw and is doing, or 15 seconds of it on your health bar to see it |
 | `/sab perf` | What the liquid costs each frame, and the costliest bars. Add a note (`/sab perf 12 mobs`) to label it; results are saved on `/reload`. `/sab perf reset` starts over, `/sab perf clear` deletes the saved ones |
 
 ## Good to know
@@ -309,8 +331,16 @@ world.
 "party1"...); `kind` "health" or "power". Calling `AddBar` again with the same arguments does nothing, so it is safe
 from your update code. With a new unit (a party frame after a roster change) the liquid follows it. Bad arguments
 raise an error in your code. `AddBar` declines (returns false) a vertical bar, a bar of Smooth Animated Bars' own, a
-nameplate unit, a bar that fails to set up, and more than ten party and raid members' bars at once (each is a liquid
-of its own; a raid frame would cost more than the game's frames together). Remove a bar before you throw it away.
+nameplate unit, a bar inside one of the game's aura buttons (below), a bar that fails to set up, and more than ten
+party and raid members' bars at once (each is a liquid of its own; a raid frame would cost more than the game's frames
+together). Remove a bar before you throw it away.
+
+**Aura timers can't take the liquid.** On Forever an addon can show a target's debuffs only through the game's
+`CustomAuraContainerTemplate`, and the bar handed to a button's `SetDurationBar` is the game's to drive. Once an aura
+is assigned, the game makes the button and everything inside it forbidden, frames other addons made there too, and
+the duration bar's values can't be read to copy into a bar of your own either. So `AddBar` declines such a bar, and
+drops one that turns forbidden after it was added. Thanks to Todd Harris for finding this out
+([#13](https://github.com/Jordanburch101/smooth-animated-bars/issues/13)).
 
 **Options**, all optional:
 - `theme`: left out, your bar's own colour; `"settings"`, the colours chosen in Smooth Animated Bars for that unit;
